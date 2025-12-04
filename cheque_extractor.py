@@ -16,10 +16,7 @@ import fitz  # PyMuPDF for PDF handling
 load_dotenv()
 key = os.getenv("GOOGLE_API_KEY")
 
-# Configure Gemini API (moved initialization inside function to avoid calling st before set_page_config)
-model = None
-model_name = None
-
+# Initialize Gemini model (cached to avoid re-initialization)
 @st.cache_resource
 def initialize_gemini():
     if not key:
@@ -28,7 +25,7 @@ def initialize_gemini():
     
     genai.configure(api_key=key)
     
-    # List available models to find one that works
+    # Try to list available models and use one that works
     try:
         available_models = []
         for model_info in genai.list_models():
@@ -36,17 +33,13 @@ def initialize_gemini():
                 available_models.append(model_info.name)
         
         if available_models:
-            # Use the first available model
-            model_name = available_models[0]
-            model = genai.GenerativeModel(model_name)
+            model = genai.GenerativeModel(available_models[0])
             return model
-    except Exception as e:
+    except:
         pass
     
-    # If listing fails, try known model names
-    model_names = ["gemini-pro", "gemini-1.0-pro"]
-    
-    for model_name in model_names:
+    # Fallback to known model names
+    for model_name in ["gemini-pro", "gemini-1.0-pro", "gemini-1.5-flash"]:
         try:
             model = genai.GenerativeModel(model_name)
             return model
@@ -56,16 +49,16 @@ def initialize_gemini():
     st.error("Could not load any Gemini model. Please check your API key.")
     st.stop()
 
-# MongoDB setup with timeout to prevent hanging
-MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://pawardarshan1204_db_user:e8YWNKRO8G7W7Nf3@cluster0.zr2canz.mongodb.net/")
-
+# MongoDB setup (optional - only used if saving to database)
 @st.cache_resource
-def get_mongodb_client():
-    return pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000, connectTimeoutMS=5000)
-
-client = get_mongodb_client()
-db = client['infosys']
-collection = db['cheque_data']
+def get_mongodb_collection():
+    try:
+        MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://pawardarshan1204_db_user:e8YWNKRO8G7W7Nf3@cluster0.zr2canz.mongodb.net/")
+        client = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000, connectTimeoutMS=5000)
+        db = client['infosys']
+        return db['cheque_data']
+    except Exception as e:
+        return None
 
 # Enhanced input prompt
 input_prompt = '''
@@ -89,8 +82,12 @@ def cheque_extractor_app():
     
     # Function to generate Gemini response
     def get_gemini_response(input_prompt, image):
-        response = model.generate_content([input_prompt, image[0]])
-        return response.text
+        try:
+            response = model.generate_content([input_prompt, image[0]])
+            return response.text
+        except Exception as e:
+            st.error(f"Error generating response: {str(e)}")
+            return None
 
     # Prepare image data for Gemini API
     def input_image_details(image_path):
@@ -139,23 +136,13 @@ def cheque_extractor_app():
         pdf.output(filename)
 
     # Streamlit UI setup
-    st.markdown("""
-    <div style='background: linear-gradient(135deg, rgba(37, 99, 235, 0.08) 0%, rgba(30, 64, 175, 0.08) 100%); 
-                padding: 1.5rem; border-radius: 16px; margin-bottom: 2rem; animation: fadeIn 0.8s ease;
-                border: 1px solid rgba(37, 99, 235, 0.2);'>
-        <h2 style='margin: 0; color: #1E40AF;'>🚀 AI Cheque Data Extractor</h2>
-        <p style='margin: 0.5rem 0 0 0; color: #0F172A; font-weight: 500;'>Powered by Google Gemini AI • Upload your cheque and let AI do the magic!</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    uploaded_file = st.file_uploader('📤 Upload a cheque image or PDF...', type=['jpg', 'jpeg', 'png', 'pdf'], 
-                                     help="Supported formats: JPG, JPEG, PNG, PDF")
+    st.subheader('Cheque Data Extractor 🚀 :gemini:')
+    uploaded_file = st.file_uploader('Upload a cheque image or PDF...', type=['jpg', 'jpeg', 'png', 'pdf'])
     output_folder = "extracted_cheques"
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
     if uploaded_file is not None:
-        st.toast(f"📄 File uploaded: {uploaded_file.name}", icon="✅")
         file_extension = uploaded_file.name.split(".")[-1].lower()
         if file_extension == "pdf":
             pdf_path = os.path.join(output_folder, uploaded_file.name)
@@ -169,33 +156,27 @@ def cheque_extractor_app():
             image_paths = [image_path]
 
         all_extracted_data = []
-        
-        # Processing with progress bar
-        st.markdown("### 🔄 Processing your cheque...")
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        for idx, img_path in enumerate(image_paths):
-            status_text.text(f"🤖 AI is analyzing image {idx + 1} of {len(image_paths)}...")
-            progress_bar.progress((idx + 1) / len(image_paths))
-            
-            image_data = input_image_details(img_path)
-            response_text = get_gemini_response(input_prompt, image_data)
-            parsed_data = parse_response(response_text)
-            all_extracted_data.append(parsed_data)
-        
-        status_text.empty()
-        progress_bar.empty()
-        
-        # Success notification
-        st.success("✅ Extraction completed successfully!")
-        st.toast("🎉 Cheque data extracted!", icon="✨")
-        st.balloons()
-        
-        # Display results
-        st.markdown("### 📊 Extracted Data")
+        for img_path in image_paths:
+            with st.spinner(f'Extracting data from {os.path.basename(img_path)}...'):
+                try:
+                    image_data = input_image_details(img_path)
+                    response_text = get_gemini_response(input_prompt, image_data)
+                    if response_text:
+                        parsed_data = parse_response(response_text)
+                        all_extracted_data.append(parsed_data)
+                    else:
+                        st.warning(f"Failed to extract data from {os.path.basename(img_path)}")
+                except Exception as e:
+                    st.error(f"Error processing {os.path.basename(img_path)}: {str(e)}")
+                    continue
+
+        if not all_extracted_data:
+            st.error("No data could be extracted from the uploaded file(s).")
+            return
+
         df = pd.DataFrame(all_extracted_data)
-        st.dataframe(df, use_container_width=True)
+        st.success("✅ Data extracted successfully!")
+        st.table(df)
 
         # Save and provide download options
         csv_buffer = io.StringIO()
@@ -207,26 +188,22 @@ def cheque_extractor_app():
         pdf_filename = os.path.join(output_folder, "cheque_data.pdf")
         save_as_pdf(all_extracted_data[0], pdf_filename)
 
-        st.markdown("### 💾 Download Options")
         col1, col2, col3, col4 = st.columns(4)
-        
         with col1:
-            if st.download_button("📊 CSV", csv_buffer.getvalue(), "cheque_data.csv", "text/csv"):
-                st.toast("📊 CSV file ready for download!", icon="💾")
-        
+            st.download_button("📄 Download CSV", csv_buffer.getvalue(), "cheque_data.csv", "text/csv")
         with col2:
-            if st.download_button("📋 JSON", json_buffer.getvalue(), "cheque_data.json", "application/json"):
-                st.toast("📋 JSON file ready for download!", icon="💾")
-        
+            st.download_button("📋 Download JSON", json_buffer.getvalue(), "cheque_data.json", "application/json")
         with col3:
             with open(pdf_filename, "rb") as pdf_file:
-                if st.download_button("📄 PDF", pdf_file.read(), "cheque_data.pdf", "application/pdf"):
-                    st.toast("📄 PDF file ready for download!", icon="💾")
-        
+                st.download_button("📕 Download PDF", pdf_file.read(), "cheque_data.pdf", "application/pdf")
         with col4:
-            if st.button("💾 Save to DB"):
-                with st.spinner('Saving to database...'):
-                    collection.insert_many(all_extracted_data)
-                st.success("✅ Data saved to database successfully!")
-                st.toast("💾 Saved to MongoDB!", icon="🎉")
-                st.snow()
+            if st.button("💾 Save to Database"):
+                collection = get_mongodb_collection()
+                if collection is not None:
+                    try:
+                        collection.insert_many(all_extracted_data)
+                        st.success("Data saved to database successfully!")
+                    except Exception as e:
+                        st.error(f"Failed to save to database: {str(e)}")
+                else:
+                    st.warning("Database connection not available. Data not saved.")

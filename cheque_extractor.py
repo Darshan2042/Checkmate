@@ -16,22 +16,54 @@ import fitz  # PyMuPDF for PDF handling
 load_dotenv()
 key = os.getenv("GOOGLE_API_KEY")
 
-if not key:
-    st.error("GOOGLE_API_KEY not found in .env file. Please add your API key.")
+# Configure Gemini API (moved initialization inside function to avoid calling st before set_page_config)
+model = None
+model_name = None
+
+@st.cache_resource
+def initialize_gemini():
+    if not key:
+        st.error("GOOGLE_API_KEY not found in .env file. Please add your API key.")
+        st.stop()
+    
+    genai.configure(api_key=key)
+    
+    # List available models to find one that works
+    try:
+        available_models = []
+        for model_info in genai.list_models():
+            if 'generateContent' in model_info.supported_generation_methods:
+                available_models.append(model_info.name)
+        
+        if available_models:
+            # Use the first available model
+            model_name = available_models[0]
+            model = genai.GenerativeModel(model_name)
+            return model
+    except Exception as e:
+        pass
+    
+    # If listing fails, try known model names
+    model_names = ["gemini-pro", "gemini-1.0-pro"]
+    
+    for model_name in model_names:
+        try:
+            model = genai.GenerativeModel(model_name)
+            return model
+        except:
+            continue
+    
+    st.error("Could not load any Gemini model. Please check your API key.")
     st.stop()
 
-# Configure Gemini API
-genai.configure(api_key=key)
-model_name = "gemini-2.5-flash"
-try:
-    model = genai.GenerativeModel(model_name)
-except Exception as e:
-    st.error(f"Error loading model {model_name}: {str(e)}")
-    st.stop()
-
-# MongoDB setup
+# MongoDB setup with timeout to prevent hanging
 MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://pawardarshan1204_db_user:e8YWNKRO8G7W7Nf3@cluster0.zr2canz.mongodb.net/")
-client = pymongo.MongoClient(MONGO_URI)
+
+@st.cache_resource
+def get_mongodb_client():
+    return pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000, connectTimeoutMS=5000)
+
+client = get_mongodb_client()
 db = client['infosys']
 collection = db['cheque_data']
 
@@ -52,6 +84,9 @@ Output the data in the exact format below with no extra symbols or placeholders:
 '''
 
 def cheque_extractor_app():
+    # Initialize Gemini model
+    model = initialize_gemini()
+    
     # Function to generate Gemini response
     def get_gemini_response(input_prompt, image):
         response = model.generate_content([input_prompt, image[0]])

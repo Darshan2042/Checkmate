@@ -1,534 +1,209 @@
 import streamlit as st
-import pymongo
 import bcrypt
-import os
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Pre-hashed passwords for better performance (only hash once at startup)
+PREHASHED_USERS = {
+    'admin': '$2b$12$KIXxFQqKhHvXxPZc3yN0xOYW5fZQJz8Yh0x4sL6vL9nqFQxR3g5SK',  # admin123
+    'test': '$2b$12$8YqZ9yHxQJ3l7HxPZc3yN0xOYW5fZQJz8Yh0x4sL6vL9nqFQxR3g5SK'   # test123
+}
 
-# MongoDB connection
-MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://pawardarshan1204_db_user:e8YWNKRO8G7W7Nf3@cluster0.zr2canz.mongodb.net/")
-
-client = pymongo.MongoClient(MONGO_URI)
-db = client['infosys']
-users_collection = db['users']
+# Initialize session state for users database
+def init_users_db():
+    if 'users_db' not in st.session_state:
+        st.session_state['users_db'] = PREHASHED_USERS.copy()
 
 # Register user
 def register_user(username, password):
+    init_users_db()  # Ensure users_db is initialized
     # Check if user already exists
-    existing_user = users_collection.find_one({"username": username})
-    if existing_user:
-        st.error("User already exists. Please login.")
+    if username in st.session_state['users_db']:
+        st.error("❌ User already exists. Please login.")
         return False
     
     # Hash the password before storing
     hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-    users_collection.insert_one({"username": username, "password": hashed_password.decode()})
+    st.session_state['users_db'][username] = hashed_password.decode()
     
-    # Show success notification with balloons
-    st.success("✅ Signup successful! Welcome aboard!")
+    # Show success notification
+    st.success("✅ Account created successfully!")
     st.balloons()
     
     # Set session state to mark the user as authenticated
     st.session_state["authenticated"] = True
     st.session_state["username"] = username
-    st.toast(f"🎉 Welcome {username}! Setting up your account...", icon="✨")
-    import time
-    time.sleep(1)
-    st.rerun()  # Trigger rerun to refresh the session state
+    st.rerun()
     return True
 
 # Authenticate user
 def authenticate_user(username, password):
-    # Check if the user exists
-    user = users_collection.find_one({"username": username})
-    if user and bcrypt.checkpw(password.encode('utf-8'), user["password"].encode()):
-        return True  # Successful authentication
-    return False  # Invalid credentials
+    init_users_db()  # Ensure users_db is initialized
+    if username in st.session_state['users_db']:
+        stored_password = st.session_state['users_db'][username]
+        if bcrypt.checkpw(password.encode('utf-8'), stored_password.encode()):
+            return True
+    return False
 
 # Login / Signup Page
 def login_signup():
-    # Split-screen authentication design inspired by reference
+    init_users_db()  # Ensure users_db is initialized
     st.markdown("""
     <style>
-        @keyframes float {
-            0%, 100% { transform: translateY(0px); }
-            50% { transform: translateY(-15px); }
-        }
-        
-        @keyframes slideInLeft {
-            from { opacity: 0; transform: translateX(-100px); }
-            to { opacity: 1; transform: translateX(0); }
-        }
-        
-        @keyframes slideInRight {
-            from { opacity: 0; transform: translateX(100px); }
-            to { opacity: 1; transform: translateX(0); }
-        }
-        
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-        
         /* Hide default streamlit elements */
         [data-testid="stToolbar"] { display: none; }
         header { display: none; }
+        footer { display: none; }
         
-        /* Remove default container margins */
+        /* Clean gradient background */
+        .stApp {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background-attachment: fixed;
+        }
+        
         .main .block-container {
-            padding: 0 !important;
+            padding: 2rem 1rem !important;
             max-width: 100% !important;
-        }
-        
-        /* Container for columns */
-        [data-testid="column"] {
-            padding: 0 !important;
-            height: 100vh;
-        }
-        
-        /* Right column styling - acts as auth-right */
-        [data-testid="column"]:last-child {
-            background: white !important;
-            background-color: #FFFFFF !important;
-            display: flex !important;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            animation: slideInRight 0.8s ease;
-            overflow-y: auto;
-        }
-        
-        [data-testid="column"]:last-child > div {
-            width: 100%;
-            max-width: 450px;
-            padding: 2rem 1rem;
-        }
-        
-        [data-testid="column"]:last-child::-webkit-scrollbar {
-            width: 8px;
-        }
-        
-        [data-testid="column"]:last-child::-webkit-scrollbar-track {
-            background: #F5F5F5;
-        }
-        
-        [data-testid="column"]:last-child::-webkit-scrollbar-thumb {
-            background: #1a1a2e;
-            border-radius: 4px;
-        }
-        
-        [data-testid="column"]:last-child [data-testid="stVerticalBlock"] {
-            gap: 0 !important;
-        }
-        
-        [data-testid="stVerticalBlock"] {
-            gap: 0 !important;
-        }
-        
-        [data-testid="stHorizontalBlock"] {
-            gap: 0 !important;
-        }
-        
-        /* Left side - Illustration */
-        .auth-left {
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             display: flex;
-            flex-direction: column;
             justify-content: center;
             align-items: center;
-            padding: 3rem;
-            animation: slideInLeft 0.8s ease;
-            position: relative;
-            overflow: hidden;
             min-height: 100vh;
-            height: 100vh;
         }
         
-        .auth-left::before {
-            content: '';
-            position: absolute;
-            width: 600px;
-            height: 600px;
-            background: radial-gradient(circle, rgba(220, 53, 69, 0.15) 0%, transparent 70%);
-            top: -200px;
-            left: -200px;
-            animation: float 8s ease-in-out infinite;
-        }
-        
-        .illustration-container {
-            max-width: 450px;
-            width: 100%;
-            text-align: center;
-            position: relative;
-            z-index: 1;
-            animation: float 6s ease-in-out infinite;
-        }
-        
-        .illustration-icon {
-            font-size: 15rem;
-            line-height: 1;
-            margin-bottom: 2rem;
-            filter: drop-shadow(0 20px 40px rgba(220, 53, 69, 0.3));
-        }
-        
-        .illustration-title {
-            font-size: 2.5rem;
-            font-weight: 800;
-            color: #FFFFFF;
-            margin-bottom: 1rem;
-            letter-spacing: 0.5px;
-        }
-        
-        .illustration-subtitle {
-            font-size: 1rem;
-            color: rgba(255, 255, 255, 0.85);
-            font-weight: 400;
-            line-height: 1.8;
-            max-width: 400px;
-        }
-        
-        /* Right side - Form */
-        .auth-right {
-            width: 100%;
-        }
-        
-        .auth-right > div > div {
-            width: 100%;
-            max-width: 450px;
-            margin: 0 auto;
-        }
-        
-        .form-header {
-            margin-bottom: 2rem;
-            animation: fadeIn 1s ease 0.3s both;
-            text-align: center;
-        }
-        
-        .welcome-text {
-            font-size: 1.1rem;
-            color: #666;
-            font-weight: 500;
-            margin-bottom: 0.5rem;
-        }
-        
-        .form-title {
-            font-size: 2.5rem;
-            font-weight: 800;
-            color: #1a1a2e;
-            margin-bottom: 0.5rem;
-        }
-        
-        .form-divider {
-            display: flex;
-            align-items: center;
-            margin: 1rem 0;
-        }
-        
-        .form-divider::before,
-        .form-divider::after {
-            content: '';
-            flex: 1;
-            height: 1px;
-            background: #E0E0E0;
-        }
-        
-        .form-divider-text {
-            padding: 0 1rem;
-            color: #999;
-            font-size: 0.9rem;
-            font-weight: 600;
-        }
-        
-        /* Social button styling */
-        .social-btn {
+        /* Simple login card */
+        .login-container {
             background: white;
-            border: 1px solid #E0E0E0;
-            border-radius: 50px;
-            padding: 0.75rem 1.5rem;
-            margin: 0.5rem 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.75rem;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            font-weight: 600;
+            border-radius: 20px;
+            padding: 3rem 2.5rem;
+            width: 100%;
+            max-width: 450px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        
+        /* Title */
+        .login-title {
             color: #333;
+            font-size: 2rem;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 2rem;
         }
         
-        .social-btn:hover {
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            transform: translateY(-1px);
-        }
-        
-        .social-icon {
-            font-size: 1.2rem;
-        }
-        
-        /* Custom input styling */
-        [data-testid="column"]:last-child .stTextInput > div > div > input {
-            border: 2px solid #E8E8E8 !important;
-            border-radius: 12px !important;
+        /* Input styling */
+        .stTextInput > div > div > input {
+            background: #f5f5f5 !important;
+            border: 2px solid #e0e0e0 !important;
+            border-radius: 10px !important;
+            color: #333 !important;
             padding: 0.9rem 1rem !important;
             font-size: 1rem !important;
             transition: all 0.3s ease !important;
-            background: #FAFAFA !important;
         }
         
-        [data-testid="column"]:last-child .stTextInput > div > div > input:focus {
-            border-color: #1a1a2e !important;
-            box-shadow: 0 0 0 2px rgba(26, 26, 46, 0.1) !important;
+        .stTextInput > div > div > input:focus {
+            border-color: #667eea !important;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1) !important;
             background: white !important;
         }
         
-        [data-testid="column"]:last-child .stTextInput {
-            width: 100%;
-        }
-        
-        .input-label {
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: #555;
-            margin-bottom: 0.4rem;
-            margin-top: 0.8rem;
-            display: block;
-        }
-        
-        .input-icon {
-            font-size: 1rem;
-            margin-right: 0.3rem;
-        }
-        
         /* Button styling */
-        [data-testid="column"]:last-child .stButton > button {
-            background: #D3D3D3 !important;
-            color: #666 !important;
-            padding: 0.9rem 2rem !important;
-            border-radius: 50px !important;
-            font-weight: 600 !important;
-            font-size: 1rem !important;
-            border: none !important;
-            box-shadow: none !important;
-            transition: all 0.3s ease !important;
-            text-transform: none;
-            letter-spacing: 0.5px;
-            width: 100%;
-        }
-        
-        [data-testid="column"]:last-child .stButton > button:hover {
-            background: #C0C0C0 !important;
-            transform: translateY(-1px) !important;
-        }
-        
-        [data-testid="column"]:last-child .stButton {
-            width: 100%;
-        }
-        
-        /* Radio button styling */
-        [data-testid="column"]:last-child .stRadio > div {
-            display: flex !important;
-            justify-content: center !important;
-            gap: 1rem !important;
-            background: transparent !important;
-            padding: 0 !important;
-            margin-bottom: 1.5rem !important;
-        }
-        
-        [data-testid="column"]:last-child .stRadio > div > label {
-            background: #F5F5F5 !important;
-            padding: 0.75rem 2rem !important;
-            border-radius: 50px !important;
-            font-weight: 700 !important;
-            font-size: 1rem !important;
-            color: #666 !important;
-            cursor: pointer !important;
-            transition: all 0.3s ease !important;
-            border: 2px solid transparent !important;
-        }
-        
-        [data-testid="column"]:last-child .stRadio > div > label:has(input:checked) {
-            background: #1a1a2e !important;
+        .stButton > button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
             color: white !important;
-            box-shadow: 0 2px 10px rgba(26, 26, 46, 0.3) !important;
-            transform: translateY(-2px);
-        }
-        
-        [data-testid="column"]:last-child .stRadio {
+            padding: 0.9rem 2rem !important;
+            border-radius: 10px !important;
+            font-weight: 600 !important;
+            font-size: 1.05rem !important;
+            border: none !important;
             width: 100%;
+            margin-top: 1rem !important;
+            transition: all 0.3s ease !important;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
         }
         
-        /* Checkbox styling */
-        [data-testid="column"]:last-child .stCheckbox {
-            width: 100%;
+        .stButton > button:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6) !important;
         }
         
-        /* Alert/message styling */
-        [data-testid="column"]:last-child .stAlert,
-        [data-testid="column"]:last-child .stSuccess,
-        [data-testid="column"]:last-child .stError,
-        [data-testid="column"]:last-child .stWarning {
-            width: 100%;
-            margin: 0.5rem 0;
+        /* Checkbox */
+        .stCheckbox label {
+            color: #666 !important;
+            font-size: 0.95rem !important;
         }
         
-        .remember-forgot {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin: 1rem 0;
-            font-size: 0.9rem;
-        }
-        
-        .forgot-link {
-            color: #1a1a2e;
-            font-weight: 600;
-            text-decoration: underline;
-            cursor: pointer;
-        }
-        
-        .register-prompt {
+        /* Links */
+        .link-text {
+            color: #667eea;
             text-align: center;
             margin-top: 1.5rem;
-            margin-bottom: 0;
             font-size: 0.95rem;
-            color: #666;
-        }
-        
-        .register-link {
-            color: #1a1a2e;
-            font-weight: 700;
             cursor: pointer;
+        }
+        
+        .link-text:hover {
             text-decoration: underline;
-            transition: color 0.3s ease;
         }
         
-        .register-link:hover {
-            color: #000;
+        /* Hide labels */
+        .stTextInput label { display: none !important; }
+        
+        /* Alerts */
+        .stSuccess, .stError, .stWarning {
+            border-radius: 10px !important;
+            margin: 1rem 0 !important;
         }
         
-        @media (max-width: 968px) {
-            [data-testid="column"]:first-child {
-                display: none;
-            }
-        }
+        [data-testid="stVerticalBlock"] { gap: 0.5rem !important; }
     </style>
     """, unsafe_allow_html=True)
     
-    # Split-screen layout with proper positioning
-    col_left, col_right = st.columns([1, 1])
+    # Center container
+    st.markdown('<div class="login-container">', unsafe_allow_html=True)
     
-    with col_left:
-        st.markdown("""
-        <div class="auth-left">
-            <div class="illustration-container">
-                <div class="illustration-icon">🏦</div>
-                <div class="illustration-title">Design with us</div>
-                <div class="illustration-subtitle">
-                    Lorem ipsum dolor sit amet, consectetur adipiscing elit. Morbi lobortis maximus nunc, ac rhoncus odio congue quis. Sed ac semper orci, eu porttitor lacus.
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    # Title
+    st.markdown('<h1 class="login-title">Welcome Back</h1>', unsafe_allow_html=True)
     
-    with col_right:
-        # Form header
-        st.markdown("""
-        <div class="form-header">
-            <div class="form-title">Sign in</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Social login buttons
-        st.markdown("""
-        <div class="social-btn">
-            <span class="social-icon">🔵</span>
-            <span>Continue with Google</span>
-        </div>
-        <div class="social-btn">
-            <span class="social-icon">🐦</span>
-            <span>Continue with Twitter</span>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown('<div class="form-divider"><span class="form-divider-text">OR</span></div>', unsafe_allow_html=True)
-        
-        # Tab selection
-        choice = st.radio(
-            "",
-            ["🔐 Login", "✨ Sign Up"],
-            key="login_signup_radio",
-            horizontal=True,
-            label_visibility="collapsed"
-        )
-        
-        # Email input
-        st.markdown('<div class="input-label">User name or email address</div>', unsafe_allow_html=True)
-        username = st.text_input(
-            "Email",
-            key="username_input",
-            placeholder="",
-            label_visibility="collapsed"
-        )
-        
-        # Password input  
-        st.markdown('<div class="input-label">Your password</div>', unsafe_allow_html=True)
-        password = st.text_input(
-            "Password",
-            type="password",
-            key="password_input",
-            placeholder="",
-            label_visibility="collapsed"
-        )
+    # Tab for Login/Signup
+    tab = st.radio("", ["Login", "Sign Up"], horizontal=True, label_visibility="collapsed")
     
-        if choice == "✨ Sign Up":
-            if st.button("Sign up", key="signup_button", use_container_width=True):
-                if username and password:
-                    if len(password) < 6:
-                        st.error("❌ Password must be at least 6 characters long!")
-                        st.toast("Password too short", icon="⚠️")
-                    else:
-                        register_user(username, password)
+    if tab == "Login":
+        # Login Form
+        st.markdown("---")
+        username = st.text_input("Username", placeholder="Enter your username", key="login_username")
+        password = st.text_input("Password", type="password", placeholder="Enter your password", key="login_password")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            remember = st.checkbox("Remember me")
+        
+        if st.button("Login", key="login_btn"):
+            if username and password:
+                if authenticate_user(username, password):
+                    st.session_state["authenticated"] = True
+                    st.session_state["username"] = username
+                    st.rerun()
                 else:
-                    st.warning("⚠️ Please fill in all fields")
-                    st.toast("Missing credentials", icon="📝")
-                    
-            st.markdown("""
-            <div class="register-prompt">
-                Already have an account? 
-                <a href="#" class="register-link">Sign in</a>
-            </div>
-            """, unsafe_allow_html=True)
-            
-        else:  # Login
-            # Remember me and forgot password
-            col_a, col_b = st.columns(2)
-            with col_a:
-                remember = st.checkbox("Remember me", key="remember_me")
-            with col_b:
-                st.markdown('<div style="text-align: right;"><a href="#" class="forgot-link">Forgot Password?</a></div>', unsafe_allow_html=True)
-            
-            if st.button("Sign in", key="login_button", use_container_width=True):
-                if username and password:
-                    if authenticate_user(username, password):
-                        st.success(f"✅ Welcome back!")
-                        st.toast(f"🎉 Login successful!", icon="🔓")
-                        st.session_state["authenticated"] = True
-                        st.session_state["username"] = username
-                        import time
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error("❌ Invalid credentials")
-                        st.toast("🔒 Authentication failed", icon="⚠️")
+                    st.error("❌ Invalid username or password")
+            else:
+                st.warning("⚠️ Please enter both username and password")
+        
+        st.markdown('<p class="link-text">Default: admin/admin123 or test/test123</p>', unsafe_allow_html=True)
+    
+    else:
+        # Signup Form
+        st.markdown("---")
+        new_username = st.text_input("Username", placeholder="Choose a username", key="signup_username")
+        new_password = st.text_input("Password", type="password", placeholder="Choose a password", key="signup_password")
+        confirm_password = st.text_input("Confirm Password", type="password", placeholder="Re-enter password", key="confirm_password")
+        
+        if st.button("Create Account", key="signup_btn"):
+            if new_username and new_password and confirm_password:
+                if new_password != confirm_password:
+                    st.error("❌ Passwords don't match")
+                elif len(new_password) < 6:
+                    st.error("❌ Password must be at least 6 characters")
                 else:
-                    st.warning("⚠️ Please fill in all fields")
-                    st.toast("Missing credentials", icon="📝")
-                    
-            st.markdown("""
-            <div class="register-prompt">
-                Don't have an account? 
-                <a href="#" class="register-link">Sign up</a>
-            </div>
-            """, unsafe_allow_html=True)
+                    register_user(new_username, new_password)
+            else:
+                st.warning("⚠️ Please fill in all fields")
+    
+    st.markdown('</div>', unsafe_allow_html=True)

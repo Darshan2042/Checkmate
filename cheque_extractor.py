@@ -84,19 +84,37 @@ def cheque_extractor_app():
     def get_gemini_response(input_prompt, image):
         try:
             response = model.generate_content([input_prompt, image[0]])
-            return response.text
+            if response and hasattr(response, 'text'):
+                return response.text
+            else:
+                st.error("Empty response from Gemini API")
+                return None
         except Exception as e:
             st.error(f"Error generating response: {str(e)}")
+            import traceback
+            st.error(f"Traceback: {traceback.format_exc()}")
             return None
 
     # Prepare image data for Gemini API
     def input_image_details(image_path):
-        with open(image_path, "rb") as img_file:
-            bytes_data = img_file.read()
-            image_parts = [
-                {'mime_type': "image/jpeg", 'data': bytes_data}
-            ]
-        return image_parts
+        try:
+            with open(image_path, "rb") as img_file:
+                bytes_data = img_file.read()
+                # Detect image type
+                if image_path.lower().endswith('.png'):
+                    mime_type = "image/png"
+                elif image_path.lower().endswith(('.jpg', '.jpeg')):
+                    mime_type = "image/jpeg"
+                else:
+                    mime_type = "image/jpeg"
+                
+                image_parts = [
+                    {'mime_type': mime_type, 'data': bytes_data}
+                ]
+            return image_parts
+        except Exception as e:
+            st.error(f"Error reading image file: {str(e)}")
+            return None
 
     # Extract images from PDF
     def extract_images_from_pdf(pdf_path, output_folder):
@@ -159,15 +177,26 @@ def cheque_extractor_app():
         for img_path in image_paths:
             with st.spinner(f'Extracting data from {os.path.basename(img_path)}...'):
                 try:
+                    st.info(f"Processing: {img_path}")
                     image_data = input_image_details(img_path)
+                    if image_data is None:
+                        st.warning(f"Failed to read image: {os.path.basename(img_path)}")
+                        continue
+                    
                     response_text = get_gemini_response(input_prompt, image_data)
                     if response_text:
+                        st.write("Raw Response:", response_text)  # Debug output
                         parsed_data = parse_response(response_text)
-                        all_extracted_data.append(parsed_data)
+                        if parsed_data:
+                            all_extracted_data.append(parsed_data)
+                        else:
+                            st.warning(f"Failed to parse data from {os.path.basename(img_path)}")
                     else:
                         st.warning(f"Failed to extract data from {os.path.basename(img_path)}")
                 except Exception as e:
                     st.error(f"Error processing {os.path.basename(img_path)}: {str(e)}")
+                    import traceback
+                    st.error(f"Traceback: {traceback.format_exc()}")
                     continue
 
         if not all_extracted_data:

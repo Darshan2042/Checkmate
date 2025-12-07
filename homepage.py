@@ -60,15 +60,15 @@ def homepage():
 
             /* Main container - unified padding and centering */
             .main .block-container {
-                max-width: 900px;
-                padding: 2rem 3rem;
+                max-width: 800px;
+                padding: 1.5rem 2rem;
                 margin: 0 auto;
             }
 
             /* Premium header with glow and animations */
             .main-header {
                 text-align: center;
-                padding: 2.5rem 2rem;
+                padding: 1.5rem;
                 background: linear-gradient(135deg, rgba(236,72,153,0.15), rgba(59,130,246,0.15));
                 border-radius: 20px;
                 margin-bottom: 2.5rem;

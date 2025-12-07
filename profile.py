@@ -29,14 +29,14 @@ def profile_page():
             /* Main container */
             .main .block-container {
                 max-width: 800px;
-                padding: 2rem 3rem;
+                padding: 1.5rem 2rem;
                 margin: 0 auto;
             }
 
             /* Profile header */
             .profile-header {
                 text-align: center;
-                padding: 2rem;
+                padding: 1.5rem;
                 background: linear-gradient(135deg, rgba(236,72,153,0.15), rgba(59,130,246,0.15));
                 border-radius: 20px;
                 margin-bottom: 2.5rem;
@@ -58,8 +58,8 @@ def profile_page():
                 background: rgba(255,255,255,0.08);
                 border: 1px solid rgba(255,255,255,0.22);
                 border-radius: 20px;
-                padding: 2.5rem;
-                margin: 2rem 0;
+                padding: 1.5rem;
+                margin: 1.5rem 0;
                 backdrop-filter: blur(16px);
                 box-shadow: inset 0 1px 4px rgba(255,255,255,0.08), 0 12px 30px rgba(0,0,0,0.35);
             }
@@ -72,8 +72,8 @@ def profile_page():
             }
 
             .profile-photo {
-                width: 150px;
-                height: 150px;
+                width: 200px;
+                height: 200px;
                 border-radius: 50%;
                 border: 4px solid;
                 border-image: linear-gradient(135deg, #ec4899, #3b82f6) 1;
@@ -176,14 +176,22 @@ def profile_page():
 
             /* Typography */
             h1, h2, h3, p, label { color: var(--text) !important; }
-            
-            /* Hide file uploader */
-            .hidden-uploader {
-                display: none;
-            }
         </style>
     """, unsafe_allow_html=True)
     
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
+        if st.button("← Back to Dashboard"):
+            st.session_state['current_page'] = 'dashboard'
+            st.rerun()
+    
+    with col2:
+        if st.button("🚪 Logout", type="primary", use_container_width=True):
+            st.session_state['authenticated'] = False
+            st.session_state['current_page'] = 'dashboard'
+            st.rerun()
+
     # Initialize session state for profile data
     if 'profile_data' not in st.session_state:
         st.session_state.profile_data = {
@@ -192,8 +200,16 @@ def profile_page():
             'phone': '+1 (555) 123-4567',
             'role': 'Premium User',
             'bio': 'AI-powered cheque processing enthusiast',
-            'photo': None
+            'photo': None,
+            'joined_date': 'Dec 2024',
+            'total_cheques': 0
         }
+    
+    # Ensure new fields exist in existing profile data
+    if 'joined_date' not in st.session_state.profile_data:
+        st.session_state.profile_data['joined_date'] = 'Dec 2024'
+    if 'total_cheques' not in st.session_state.profile_data:
+        st.session_state.profile_data['total_cheques'] = 0
     
     # Profile header
     st.markdown("""
@@ -206,29 +222,42 @@ def profile_page():
     """, unsafe_allow_html=True)
     
     # Navigation buttons
-    col1, col2 = st.columns(2)
     
-    with col1:
-        if st.button("← Back to Dashboard"):
-            st.session_state['current_page'] = 'dashboard'
+    
+    
+    
+    # Initialize edit mode state
+    if 'edit_mode' not in st.session_state:
+        st.session_state.edit_mode = False
+    
+    # Profile section title with gradient
+    st.markdown("""
+        <h2 style="margin: 0rem 0 0rem 0; font-size: 1.8rem; font-weight: 999;">
+            <span style="background: linear-gradient(90deg, #ec4899, #3b82f6, #22c55e); 
+                         -webkit-background-clip: text; 
+                         -webkit-text-fill-color: transparent; 
+                         background-clip: text;">
+                Personal Information
+            </span>
+        </h2>
+    """, unsafe_allow_html=True)
+    
+    # Edit button
+    col_edit1, col_edit2 = st.columns([4, 1])
+    with col_edit2:
+        if st.button("✏️ Edit" if not st.session_state.edit_mode else "❌ Cancel", use_container_width=True, key="toggle_edit"):
+            st.session_state.edit_mode = not st.session_state.edit_mode
             st.rerun()
     
-    with col2:
-        if st.button("🚪 Logout", type="primary"):
-            st.session_state['authenticated'] = False
-            st.session_state['current_page'] = 'dashboard'
-            st.rerun()
+    # Profile content in a single card
     
-    # Profile card
-    # st.markdown('<div class="profile-card">', unsafe_allow_html=True)
     
-    # Profile photo section
-    col1, col2 = st.columns([1, 2])
+    # Top section: Photo on left, key info on right
+    col_photo, col_info = st.columns([1, 2])
     
-    with col1:
-        st.markdown('<div class="profile-photo-container">', unsafe_allow_html=True)
-        
+    with col_photo:
         # Hidden file uploader
+        import base64
         uploaded_photo = st.file_uploader("Upload Photo", type=['png', 'jpg', 'jpeg'], label_visibility="collapsed", key="photo_uploader")
         
         # Display profile photo or placeholder with click handler
@@ -236,74 +265,123 @@ def profile_page():
         if st.session_state.profile_data['photo']:
             try:
                 image = Image.open(io.BytesIO(st.session_state.profile_data['photo']))
-                # Save image temporarily to display
-                import base64
                 buffered = io.BytesIO()
                 image.save(buffered, format="PNG")
                 img_str = base64.b64encode(buffered.getvalue()).decode()
                 photo_html = f'''
-                    <div class="profile-photo" onclick="document.querySelector('[data-testid=\\'stFileUploader\\'] input').click()" style="background-image: url(data:image/png;base64,{img_str}); background-size: cover; background-position: center; font-size: 0;">
+                    <div class="profile-photo" onclick="document.querySelector('[data-testid=\\'stFileUploader\\'] input').click()" style="background-image: url(data:image/png;base64,{img_str}); background-size: cover; background-position: center; font-size: 0; width: 180px; height: 180px; margin: 0 auto;">
                     </div>
                 '''
             except:
-                photo_html = """<div class="profile-photo" onclick="document.querySelector('[data-testid=\\"stFileUploader\\"] input').click()">👤</div>"""
+                photo_html = """<div class="profile-photo" onclick="document.querySelector('[data-testid=\\'stFileUploader\\'] input').click()" style="width: 180px; height: 180px; margin: 0 auto;">👤</div>"""
         else:
-            photo_html = """<div class="profile-photo" onclick="document.querySelector('[data-testid=\\"stFileUploader\\"] input').click()">👤</div>"""
+            photo_html = """<div class="profile-photo" onclick="document.querySelector('[data-testid=\\'stFileUploader\\'] input').click()" style="width: 180px; height: 180px; margin: 0 auto;">👤</div>"""
         
         st.markdown(photo_html, unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
         
         # Handle photo upload
         if uploaded_photo:
             st.session_state.profile_data['photo'] = uploaded_photo.read()
             st.rerun()
+        
+        # Remove photo button (only show in edit mode if photo exists)
+        if st.session_state.get('edit_mode', False) and st.session_state.profile_data['photo']:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🗑️ Remove Photo", use_container_width=True, key="remove_photo"):
+                st.session_state.profile_data['photo'] = None
+                st.rerun()
     
-    with col2:
-        # User info badges
-        st.markdown(f"""
-            <div style="margin-top: 2rem;">
-                <span class="info-badge">🎖️ {st.session_state.profile_data['role']}</span>
-                <span class="info-badge">📧 Verified</span>
-                <span class="info-badge">⚡ Active</span>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    # st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Editable profile information
-    st.markdown('<div class="section-title">📝 Personal Information</div>', unsafe_allow_html=True)
-    
-    # Create two columns for form fields
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        name = st.text_input("Full Name", value=st.session_state.profile_data['name'], key="profile_name")
-        email = st.text_input("Email", value=st.session_state.profile_data['email'], key="profile_email")
-    
-    with col2:
-        phone = st.text_input("Phone", value=st.session_state.profile_data['phone'], key="profile_phone")
-        role = st.text_input("Role", value=st.session_state.profile_data['role'], key="profile_role")
-    
-    bio = st.text_area("Bio", value=st.session_state.profile_data['bio'], height=100, key="profile_bio")
-    
-    # Save changes and logout buttons
-    st.markdown("<br>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 1, 1])
-    
-    with col1:
-        if st.button("🚪 Logout", use_container_width=True):
-            st.session_state['authenticated'] = False
-            st.session_state['current_page'] = 'dashboard'
-            st.rerun()
-    
-    with col2:
-        if st.button("💾 Save Changes", use_container_width=True):
-            # Update profile data
-            st.session_state.profile_data['name'] = name
-            st.session_state.profile_data['email'] = email
-            st.session_state.profile_data['phone'] = phone
-            st.session_state.profile_data['role'] = role
-            st.session_state.profile_data['bio'] = bio
+    with col_info:
+        # Display or edit personal information
+        if not st.session_state.edit_mode:
+            # Display mode - Grid layout for info
+            st.markdown(f"""
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div style="padding: 1rem; background: linear-gradient(135deg, rgba(236,72,153,0.1), rgba(59,130,246,0.1)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                        <div style="color: #c7c7d1; font-size: 0.8rem; margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.5px;">👤 Full Name</div>
+                        <div style="color: #ffffff; font-size: 1.1rem; font-weight: 700;">{st.session_state.profile_data['name']}</div>
+                    </div>
+                    <div style="padding: 1rem; background: linear-gradient(135deg, rgba(59,130,246,0.1), rgba(34,197,94,0.1)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                        <div style="color: #c7c7d1; font-size: 0.8rem; margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.5px;">💼 Role</div>
+                        <div style="color: #ffffff; font-size: 1.1rem; font-weight: 700;">{st.session_state.profile_data['role']}</div>
+                    </div>
+                    <div style="padding: 1rem; background: linear-gradient(135deg, rgba(34,197,94,0.1), rgba(236,72,153,0.1)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                        <div style="color: #c7c7d1; font-size: 0.8rem; margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.5px;">📧 Email</div>
+                        <div style="color: #ffffff; font-size: 1.1rem; font-weight: 700;">{st.session_state.profile_data['email']}</div>
+                    </div>
+                    <div style="padding: 1rem; background: linear-gradient(135deg, rgba(236,72,153,0.1), rgba(59,130,246,0.1)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                        <div style="color: #c7c7d1; font-size: 0.8rem; margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.5px;">📱 Phone</div>
+                        <div style="color: #ffffff; font-size: 1.1rem; font-weight: 700;">{st.session_state.profile_data['phone']}</div>
+                    </div>
+                    <div style="padding: 1rem; background: linear-gradient(135deg, rgba(59,130,246,0.1), rgba(34,197,94,0.1)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                        <div style="color: #c7c7d1; font-size: 0.8rem; margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.5px;">📅 Joined</div>
+                        <div style="color: #ffffff; font-size: 1.1rem; font-weight: 700;">{st.session_state.profile_data['joined_date']}</div>
+                    </div>
+                    <div style="padding: 1rem; background: linear-gradient(135deg, rgba(34,197,94,0.1), rgba(236,72,153,0.1)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                        <div style="color: #c7c7d1; font-size: 0.8rem; margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.5px;">📊 Cheques</div>
+                        <div style="color: #ffffff; font-size: 1.1rem; font-weight: 700;">{st.session_state.profile_data['total_cheques']} Processed</div>
+                    </div>
+                </div>
+                <div style="margin-top: 1rem; padding: 1rem; background: linear-gradient(135deg, rgba(236,72,153,0.08), rgba(59,130,246,0.08)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                    <div style="color: #c7c7d1; font-size: 0.8rem; margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.5px;">✍️ Bio</div>
+                    <div style="color: #ffffff; font-size: 1rem; font-weight: 600; line-height: 1.6;">{st.session_state.profile_data['bio']}</div>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        # Edit mode - show editable inputs in grid layout
+        else:
+            # Create grid layout similar to display mode
+            col1, col2 = st.columns(2)
             
-            st.success("✅ Profile updated successfully!")
-            st.balloons()
+            with col1:
+                st.markdown('<div style="padding: 0.5rem; background: linear-gradient(135deg, rgba(236,72,153,0.1), rgba(59,130,246,0.1)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 1rem;">', unsafe_allow_html=True)
+                name = st.text_input("👤 Full Name", value=st.session_state.profile_data['name'], key="profile_name", label_visibility="visible")
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+                st.markdown('<div style="padding: 0.5rem; background: linear-gradient(135deg, rgba(34,197,94,0.1), rgba(236,72,153,0.1)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 1rem;">', unsafe_allow_html=True)
+                email = st.text_input("📧 Email", value=st.session_state.profile_data['email'], key="profile_email", label_visibility="visible")
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+                st.markdown('<div style="padding: 0.5rem; background: linear-gradient(135deg, rgba(59,130,246,0.1), rgba(34,197,94,0.1)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 1rem;">', unsafe_allow_html=True)
+                phone = st.text_input("📱 Phone", value=st.session_state.profile_data['phone'], key="profile_phone", label_visibility="visible")
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown('<div style="padding: 0.5rem; background: linear-gradient(135deg, rgba(59,130,246,0.1), rgba(34,197,94,0.1)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 1rem;">', unsafe_allow_html=True)
+                role = st.text_input("💼 Role", value=st.session_state.profile_data['role'], key="profile_role", label_visibility="visible")
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+                # Display-only fields
+                st.markdown(f"""
+                    <div style="padding: 1rem; background: linear-gradient(135deg, rgba(34,197,94,0.1), rgba(236,72,153,0.1)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 1rem;">
+                        <div style="color: #c7c7d1; font-size: 0.8rem; margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.5px;">📅 Joined</div>
+                        <div style="color: #ffffff; font-size: 1.1rem; font-weight: 700;">{st.session_state.profile_data['joined_date']}</div>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                st.markdown(f"""
+                    <div style="padding: 1rem; background: linear-gradient(135deg, rgba(236,72,153,0.1), rgba(59,130,246,0.1)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 1rem;">
+                        <div style="color: #c7c7d1; font-size: 0.8rem; margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.5px;">📊 Cheques</div>
+                        <div style="color: #ffffff; font-size: 1.1rem; font-weight: 700;">{st.session_state.profile_data['total_cheques']} Processed</div>
+                    </div>
+                """, unsafe_allow_html=True)
+            
+            # Bio field - full width
+            st.markdown('<div style="padding: 0.5rem; background: linear-gradient(135deg, rgba(236,72,153,0.08), rgba(59,130,246,0.08)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-top: 1rem;">', unsafe_allow_html=True)
+            bio = st.text_area("✍️ Bio", value=st.session_state.profile_data['bio'], height=100, key="profile_bio", label_visibility="visible")
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Save button in edit mode
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("💾 Save Changes", use_container_width=True, key="save_in_edit"):
+                st.session_state.profile_data['name'] = name
+                st.session_state.profile_data['email'] = email
+                st.session_state.profile_data['phone'] = phone
+                st.session_state.profile_data['role'] = role
+                st.session_state.profile_data['bio'] = bio
+                st.session_state.edit_mode = False
+                st.success("✅ Profile updated successfully!")
+                st.balloons()
+                st.rerun()
+    
+    st.markdown('</div>', unsafe_allow_html=True)

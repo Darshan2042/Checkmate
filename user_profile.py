@@ -208,8 +208,10 @@ def profile_page():
     # Ensure new fields exist in existing profile data
     if 'joined_date' not in st.session_state.profile_data:
         st.session_state.profile_data['joined_date'] = 'Dec 2024'
-    if 'total_cheques' not in st.session_state.profile_data:
-        st.session_state.profile_data['total_cheques'] = 0
+    
+    # Get real-time cheque count from database
+    from cheque_extractor import get_total_cheque_count
+    st.session_state.profile_data['total_cheques'] = get_total_cheque_count()
     
     # Profile header
     st.markdown("""

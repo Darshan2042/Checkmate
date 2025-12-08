@@ -256,11 +256,18 @@ def profile_page():
     col_photo, col_info = st.columns([1, 2])
     
     with col_photo:
-        # Hidden file uploader
         import base64
-        uploaded_photo = st.file_uploader("Upload Photo", type=['png', 'jpg', 'jpeg'], label_visibility="collapsed", key="photo_uploader")
         
-        # Display profile photo or placeholder with click handler
+        # Show file uploader only if no photo exists
+        if not st.session_state.profile_data['photo']:
+            uploaded_photo = st.file_uploader("Upload Photo", type=['png', 'jpg', 'jpeg'], label_visibility="collapsed", key="photo_uploader")
+            
+            # Handle photo upload
+            if uploaded_photo:
+                st.session_state.profile_data['photo'] = uploaded_photo.read()
+                st.rerun()
+        
+        # Display profile photo or placeholder
         photo_html = ""
         if st.session_state.profile_data['photo']:
             try:
@@ -269,20 +276,15 @@ def profile_page():
                 image.save(buffered, format="PNG")
                 img_str = base64.b64encode(buffered.getvalue()).decode()
                 photo_html = f'''
-                    <div class="profile-photo" onclick="document.querySelector('[data-testid=\\'stFileUploader\\'] input').click()" style="background-image: url(data:image/png;base64,{img_str}); background-size: cover; background-position: center; font-size: 0; width: 180px; height: 180px; margin: 0 auto;">
+                    <div class="profile-photo" style="background-image: url(data:image/png;base64,{img_str}); background-size: cover; background-position: center; font-size: 0; width: 250px; height: 250px; margin: 0 auto;">
                     </div>
                 '''
             except:
-                photo_html = """<div class="profile-photo" onclick="document.querySelector('[data-testid=\\'stFileUploader\\'] input').click()" style="width: 180px; height: 180px; margin: 0 auto;">👤</div>"""
+                photo_html = """<div class="profile-photo" style="width: 250px; height: 250px; margin: 0 auto;">👤</div>"""
         else:
-            photo_html = """<div class="profile-photo" onclick="document.querySelector('[data-testid=\\'stFileUploader\\'] input').click()" style="width: 180px; height: 180px; margin: 0 auto;">👤</div>"""
+            photo_html = """<div class="profile-photo" style="width: 250px; height: 250px; margin: 0 auto;">👤</div>"""
         
         st.markdown(photo_html, unsafe_allow_html=True)
-        
-        # Handle photo upload
-        if uploaded_photo:
-            st.session_state.profile_data['photo'] = uploaded_photo.read()
-            st.rerun()
         
         # Remove photo button (only show in edit mode if photo exists)
         if st.session_state.get('edit_mode', False) and st.session_state.profile_data['photo']:

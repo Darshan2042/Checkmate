@@ -1,7 +1,7 @@
 import streamlit as st
 from authentication import login_signup
 from homepage import homepage
-from profile import profile_page
+from user_profile import profile_page
 
 # Page configuration - MUST be first Streamlit command
 st.set_page_config(

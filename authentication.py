@@ -6,18 +6,22 @@ import streamlit.components.v1 as components
 def initialize_user_profile(username):
     """Load user profile from MongoDB or create new one"""
     try:
-        from cheque_extractor import load_user_profile
+        from cheque_extractor import load_user_profile, save_user_profile
+        
+        print(f"Initializing profile for user: {username}")
         
         # Try to load existing profile
         loaded_profile = load_user_profile()
         
         if loaded_profile:
+            print(f"Loaded existing profile from MongoDB for: {username}")
             # Load existing profile from database
             st.session_state.profile_data = loaded_profile
             # Ensure photo field exists (photo is now stored in DB as base64)
             if 'photo' not in st.session_state.profile_data:
                 st.session_state.profile_data['photo'] = None
         else:
+            print(f"Creating new profile for: {username}")
             # Create new profile for this user
             st.session_state.profile_data = {
                 'name': username.capitalize(),
@@ -31,13 +35,20 @@ def initialize_user_profile(username):
             }
             
             # Save the new profile to MongoDB
-            from cheque_extractor import save_user_profile
-            save_user_profile(st.session_state.profile_data)
+            save_result = save_user_profile(st.session_state.profile_data)
+            if save_result:
+                print(f"Successfully saved new profile to MongoDB for: {username}")
+            else:
+                print(f"Failed to save new profile to MongoDB for: {username}")
         
         # Mark which user this profile belongs to
         st.session_state.current_profile_user = username
         
     except Exception as e:
+        print(f"Error in initialize_user_profile: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        
         # Fallback to basic profile if MongoDB fails
         st.session_state.profile_data = {
             'name': username.capitalize(),
@@ -54,32 +65,74 @@ def initialize_user_profile(username):
 # Initialize session-based user storage (no database required)
 def init_users_db():
     if 'users_db' not in st.session_state:
-        # Pre-hashed passwords for default users
-        st.session_state['users_db'] = {
-            'admin': bcrypt.hashpw('admin123'.encode('utf-8'), bcrypt.gensalt()).decode(),
-            'test': bcrypt.hashpw('test123'.encode('utf-8'), bcrypt.gensalt()).decode()
-        }
+        # Load all users from MongoDB
+        from cheque_extractor import get_all_usernames, load_user_credentials
+        
+        st.session_state['users_db'] = {}
+        
+        # Load existing users from MongoDB
+        usernames = get_all_usernames()
+        print(f"Loading {len(usernames)} users from MongoDB")
+        
+        for username in usernames:
+            password_hash = load_user_credentials(username)
+            if password_hash:
+                st.session_state['users_db'][username] = password_hash
+                print(f"Loaded credentials for user: {username}")
+        
+        print(f"Total users in session: {len(st.session_state['users_db'])}")
 
 # Register user
 def register_user(username, password):
     init_users_db()
     
+    print(f"Attempting to register new user: {username}")
+    
     # Check if user already exists
     if username in st.session_state['users_db']:
-        st.error("❌ User already exists. Please login.")
+        print(f"User {username} already exists")
         return False
     
     # Hash the password before storing
     hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-    st.session_state['users_db'][username] = hashed_password.decode()
-    st.success("✅ Signup successful!")
+    hashed_password_str = hashed_password.decode()
+    st.session_state['users_db'][username] = hashed_password_str
+    
+    print(f"User {username} added to session database")
 
     # Set session state to mark the user as authenticated
     st.session_state["authenticated"] = True
     st.session_state["username"] = username
     
-    # Load or initialize user profile from MongoDB
+    # First, save credentials to MongoDB
+    from cheque_extractor import save_user_credentials
+    credentials_saved = save_user_credentials(username, hashed_password_str)
+    if credentials_saved:
+        print(f"✓ Credentials saved to MongoDB for {username}")
+    else:
+        print(f"✗ Warning: Failed to save credentials to MongoDB for {username}")
+    
+    # Then initialize profile (which will also save to MongoDB)
+    print(f"Initializing MongoDB profile for new user: {username}")
     initialize_user_profile(username)
+    
+    # Verify both credentials and profile were saved
+    from cheque_extractor import load_user_profile, load_user_credentials
+    saved_profile = load_user_profile()
+    saved_credentials = load_user_credentials(username)
+    
+    if saved_profile:
+        print(f"✓ Profile successfully saved to MongoDB for {username}")
+    else:
+        print(f"✗ Warning: Profile may not have been saved to MongoDB for {username}")
+    
+    if saved_credentials:
+        print(f"✓ Credentials verified in MongoDB for {username}")
+    else:
+        print(f"✗ ERROR: Credentials NOT found in MongoDB for {username}!")
+        # Try to save again
+        print(f"Attempting to re-save credentials...")
+        save_user_credentials(username, hashed_password_str)
     
     st.rerun()
     return True
@@ -286,12 +339,11 @@ def login_signup():
                             # Load user profile from MongoDB
                             initialize_user_profile(username)
                             
-                            st.success(f"✅ Login successful. Welcome back, {username}!")
                             st.rerun()
                         else:
-                            st.error("❌ Invalid username or password.")
+                            pass
                 else:
-                    st.warning("⚠️ Please enter a username and password.")
+                    pass
 
             # # Default credentials hint
             # st.markdown("<br>", unsafe_allow_html=True)
@@ -308,13 +360,13 @@ def login_signup():
             if submit_signup:
                 if username and password and confirm_password:
                     if password != confirm_password:
-                        st.error("❌ Passwords don't match!")
+                        pass
                     elif len(password) < 6:
-                        st.error("❌ Password must be at least 6 characters!")
+                        pass
                     else:
                         register_user(username, password)
                 else:
-                    st.warning("⚠️ Please fill in all fields.")
+                    pass
 
             # Footer: Back to login
             if st.button("Back to Login", use_container_width=True):

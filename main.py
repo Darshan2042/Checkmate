@@ -6,7 +6,7 @@ from user_profile import profile_page
 # Page configuration - MUST be first Streamlit command
 st.set_page_config(
     page_title="CheckMate - AI Cheque Extractor",
-    page_icon="💳",
+    page_icon="Logo.png",
     layout="wide",
     initial_sidebar_state="collapsed"
 )

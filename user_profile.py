@@ -180,6 +180,15 @@ def profile_page():
         </style>
     """, unsafe_allow_html=True)
     
+    # Check authentication
+    if not st.session_state.get('authenticated', False):
+        st.error("Please login to view your profile")
+        st.stop()
+    
+    if 'username' not in st.session_state:
+        st.error("No user session found")
+        st.stop()
+    
     col1, col2 = st.columns([3, 1])
 
     with col1:
@@ -212,10 +221,10 @@ def profile_page():
             # Create new profile for this user
             st.session_state.profile_data = {
                 'name': username.capitalize(),
-                'email': f'{username}@checkmate.ai',
-                'phone': '+1 (555) 000-0000',
-                'role': 'Premium User',
-                'bio': 'AI-powered cheque processing user',
+                'email': '',
+                'phone': '',
+                'role': 'User',
+                'bio': '',
                 'photo': None,
                 'joined_date': 'Dec 2024',
                 'total_cheques': 0
@@ -224,6 +233,19 @@ def profile_page():
         # Mark which user this profile belongs to
         st.session_state.current_profile_user = username
     
+    # Safety check - ensure profile_data exists
+    if 'profile_data' not in st.session_state:
+        st.session_state.profile_data = {
+            'name': username.capitalize(),
+            'email': '',
+            'phone': '',
+            'role': 'User',
+            'bio': '',
+            'photo': None,
+            'joined_date': 'Dec 2024',
+            'total_cheques': 0
+        }
+    
     # Ensure new fields exist in existing profile data
     if 'joined_date' not in st.session_state.profile_data:
         st.session_state.profile_data['joined_date'] = 'Dec 2024'
@@ -231,6 +253,20 @@ def profile_page():
     # Initialize cheque count if not exists
     if 'total_cheques' not in st.session_state.profile_data:
         st.session_state.profile_data['total_cheques'] = 0
+    
+    # Ensure all required fields exist
+    required_fields = {
+        'name': username.capitalize(),
+        'email': '',
+        'phone': '',
+        'role': 'User',
+        'bio': '',
+        'photo': None
+    }
+    
+    for field, default_value in required_fields.items():
+        if field not in st.session_state.profile_data:
+            st.session_state.profile_data[field] = default_value
     
     # Update cheque count in background (non-blocking)
     try:
@@ -297,6 +333,11 @@ def profile_page():
             # Handle photo upload
             if uploaded_photo:
                 st.session_state.profile_data['photo'] = uploaded_photo.read()
+                
+                # Immediately save to MongoDB
+                from cheque_extractor import save_user_profile
+                save_user_profile(st.session_state.profile_data)
+                
                 st.rerun()
         
         # Display profile photo or placeholder
@@ -323,9 +364,25 @@ def profile_page():
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🗑️ Remove Photo", use_container_width=True, key="remove_photo"):
                 st.session_state.profile_data['photo'] = None
+                
+                # Immediately save to MongoDB
+                from cheque_extractor import save_user_profile
+                save_user_profile(st.session_state.profile_data)
+                
                 st.rerun()
     
     with col_info:
+        # Final safety check before displaying - ensure all fields exist
+        if 'profile_data' not in st.session_state or not isinstance(st.session_state.profile_data, dict):
+            st.error("Profile data is not available. Please try logging out and back in.")
+            st.stop()
+        
+        # Ensure all required display fields exist
+        display_fields = ['name', 'email', 'phone', 'role', 'bio']
+        for field in display_fields:
+            if field not in st.session_state.profile_data:
+                st.session_state.profile_data[field] = f"Not set"
+        
         # Display or edit personal information
         if not st.session_state.edit_mode:
             # Display mode - Grid layout for info
@@ -373,16 +430,20 @@ def profile_page():
                 st.markdown('</div>', unsafe_allow_html=True)
                 
                 st.markdown('<div style="padding: 0.5rem; background: linear-gradient(135deg, rgba(34,197,94,0.1), rgba(236,72,153,0.1)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 1rem;">', unsafe_allow_html=True)
-                email = st.text_input("📧 Email", value=st.session_state.profile_data['email'], key="profile_email", label_visibility="visible")
+                email = st.text_input("📧 Email", value=st.session_state.profile_data['email'], placeholder="Enter your email address", key="profile_email", label_visibility="visible")
                 st.markdown('</div>', unsafe_allow_html=True)
                 
                 st.markdown('<div style="padding: 0.5rem; background: linear-gradient(135deg, rgba(59,130,246,0.1), rgba(34,197,94,0.1)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 1rem;">', unsafe_allow_html=True)
-                phone = st.text_input("📱 Phone", value=st.session_state.profile_data['phone'], key="profile_phone", label_visibility="visible")
+                phone = st.text_input("📱 Phone", value=st.session_state.profile_data['phone'], placeholder="Enter your phone number", key="profile_phone", label_visibility="visible")
                 st.markdown('</div>', unsafe_allow_html=True)
             
             with col2:
                 st.markdown('<div style="padding: 0.5rem; background: linear-gradient(135deg, rgba(59,130,246,0.1), rgba(34,197,94,0.1)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 1rem;">', unsafe_allow_html=True)
-                role = st.text_input("💼 Role", value=st.session_state.profile_data['role'], key="profile_role", label_visibility="visible")
+                role_options = ['User', 'Premium User', 'Business User', 'Enterprise User', 'Accountant', 'Finance Manager', 'Auditor', 'Admin']
+                current_role = st.session_state.profile_data.get('role', 'User')
+                if current_role not in role_options:
+                    role_options.append(current_role)
+                role = st.selectbox("💼 Role", options=role_options, index=role_options.index(current_role) if current_role in role_options else 0, key="profile_role", label_visibility="visible")
                 st.markdown('</div>', unsafe_allow_html=True)
                 
                 # Display-only fields
@@ -402,7 +463,7 @@ def profile_page():
             
             # Bio field - full width
             st.markdown('<div style="padding: 0.5rem; background: linear-gradient(135deg, rgba(236,72,153,0.08), rgba(59,130,246,0.08)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-top: 1rem;">', unsafe_allow_html=True)
-            bio = st.text_area("✍️ Bio", value=st.session_state.profile_data['bio'], height=100, key="profile_bio", label_visibility="visible")
+            bio = st.text_area("✍️ Bio", value=st.session_state.profile_data['bio'], placeholder="Tell us about yourself...", height=100, key="profile_bio", label_visibility="visible")
             st.markdown('</div>', unsafe_allow_html=True)
             
             # Save button in edit mode
@@ -416,11 +477,7 @@ def profile_page():
                 
                 # Save to MongoDB
                 from cheque_extractor import save_user_profile
-                if save_user_profile(st.session_state.profile_data):
-                    st.success("✅ Profile updated and saved to database!")
-                else:
-                    st.success("✅ Profile updated locally!")
-                    st.info("💡 Profile will be saved to database when you extract a cheque.")
+                save_user_profile(st.session_state.profile_data)
                 
                 st.session_state.edit_mode = False
                 st.balloons()

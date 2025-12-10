@@ -370,7 +370,7 @@ def homepage():
         </div>
     """, unsafe_allow_html=True)
     
-    # Welcome message with profile button at same level
+    # Welcome message with profile button
     if "username" in st.session_state:
         col1, col2 = st.columns([3, 1])
         with col1:

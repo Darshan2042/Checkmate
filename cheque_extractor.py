@@ -23,14 +23,16 @@ def initialize_gemini():
     key = os.getenv("GOOGLE_API_KEY")
     
     if not key or key.strip() == "":
-        st.error("❌ GOOGLE_API_KEY not found in .env file. Please add your API key from https://aistudio.google.com/app/apikey")
+        st.error("❌ Google API Key not found!")
+        st.info("Please add your GOOGLE_API_KEY to the .env file")
         st.stop()
     
     try:
         genai.configure(api_key=key.strip())
+        print(f"✓ Gemini API configured successfully")
     except Exception as e:
         st.error(f"❌ Failed to configure Gemini API: {str(e)}")
-        st.error(f"Current API Key (first 10 chars): {key[:10]}...")
+        st.info("Please check if your GOOGLE_API_KEY is valid")
         st.stop()
     
     # Try to list available models and use one that works
@@ -41,20 +43,28 @@ def initialize_gemini():
                 available_models.append(model_info.name)
         
         if available_models:
+            print(f"✓ Found {len(available_models)} available Gemini models")
+            print(f"  Using: {available_models[0]}")
             model = genai.GenerativeModel(available_models[0])
             return model
-    except:
+    except Exception as e:
+        print(f"Warning: Could not list models - {str(e)}")
         pass
     
     # Fallback to known model names
-    for model_name in ["gemini-pro", "gemini-1.0-pro", "gemini-1.5-flash"]:
+    model_names = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro", "gemini-1.0-pro"]
+    for model_name in model_names:
         try:
+            print(f"Trying model: {model_name}")
             model = genai.GenerativeModel(model_name)
+            print(f"✓ Successfully initialized {model_name}")
             return model
-        except:
+        except Exception as e:
+            print(f"  Failed: {str(e)}")
             continue
     
-    st.error("Could not load any Gemini model. Please check your API key.")
+    st.error("❌ Could not initialize any Gemini model")
+    st.info("Possible reasons:\n- Invalid API key\n- API not enabled for your account\n- Network connectivity issues")
     st.stop()
 
 # MongoDB setup (optional - only used if saving to database)
@@ -63,34 +73,57 @@ def get_mongodb_client():
     """Get MongoDB client with proper SSL configuration"""
     try:
         load_dotenv(override=True)
-        MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://pawardarshan1204_db_user:e8YWNKRO8G7W7Nf3@cluster0.zr2canz.mongodb.net/")
+        MONGO_URI = os.getenv("MONGO_URI")
+        
+        if not MONGO_URI:
+            print("ERROR: MONGO_URI not found in .env file")
+            return None
+        
+        # Remove quotes and whitespace if present
+        MONGO_URI = MONGO_URI.strip('"').strip("'").strip()
+        
+        # Remove any line breaks that might be in the URI
+        MONGO_URI = MONGO_URI.replace('\n', '').replace('\r', '')
+        
+        print(f"Attempting MongoDB connection to: {MONGO_URI[:50]}...")
         
         # Try different SSL configurations for Windows compatibility
         try:
-            # First attempt: Use system SSL with shorter timeout
-            import ssl
+            # First attempt: Use system SSL with longer timeout
             client = pymongo.MongoClient(
                 MONGO_URI,
                 tls=True,
                 tlsAllowInvalidCertificates=False,
-                serverSelectionTimeoutMS=3000,  # Reduced to 3 seconds
-                connectTimeoutMS=3000
+                serverSelectionTimeoutMS=10000,  # Increased to 10 seconds
+                connectTimeoutMS=10000
             )
+            # Test connection
             client.admin.command('ping')
-        except:
-            # Fallback: Allow invalid certificates for Windows SSL issues
-            client = pymongo.MongoClient(
-                MONGO_URI,
-                tls=True,
-                tlsAllowInvalidCertificates=True,
-                serverSelectionTimeoutMS=3000,  # Reduced to 3 seconds
-                connectTimeoutMS=3000
-            )
-            client.admin.command('ping')
+            print("MongoDB connected successfully (with valid certificates)")
+            return client
+        except Exception as e1:
+            print(f"First connection attempt failed: {str(e1)[:100]}")
+            try:
+                # Fallback: Allow invalid certificates for Windows SSL issues
+                client = pymongo.MongoClient(
+                    MONGO_URI,
+                    tls=True,
+                    tlsAllowInvalidCertificates=True,
+                    serverSelectionTimeoutMS=10000,
+                    connectTimeoutMS=10000
+                )
+                # Test connection
+                client.admin.command('ping')
+                print("MongoDB connected successfully (allowing invalid certificates)")
+                return client
+            except Exception as e2:
+                print(f"Second connection attempt failed: {str(e2)[:100]}")
+                raise
         
-        return client
     except Exception as e:
         print(f"MongoDB connection error: {str(e)[:200]}")
+        import traceback
+        print(traceback.format_exc())
         return None
 
 def get_mongodb_collection():
@@ -147,9 +180,14 @@ def save_user_profile(profile_data):
     try:
         collection = get_user_profile_collection()
         if collection is None:
+            print("ERROR: Could not get user profile collection")
             return False
         
         username = st.session_state.get('username', 'default_user')
+        print(f"Saving profile for user: {username}")
+        
+        # Load existing data to preserve password_hash
+        existing_data = collection.find_one({'username': username})
         
         # Prepare profile data
         profile_to_save = profile_data.copy()
@@ -164,15 +202,24 @@ def save_user_profile(profile_data):
         from datetime import datetime
         profile_to_save['last_updated'] = datetime.now().isoformat()
         
+        # Preserve password_hash if it exists in database
+        if existing_data and 'password_hash' in existing_data:
+            profile_to_save['password_hash'] = existing_data['password_hash']
+            print(f"Preserving existing password_hash for {username}")
+        
         # Update or insert profile
-        collection.update_one(
+        result = collection.update_one(
             {'username': username},
             {'$set': profile_to_save},
             upsert=True
         )
+        
+        print(f"Profile save result - Matched: {result.matched_count}, Modified: {result.modified_count}, Upserted: {result.upserted_id}")
         return True
     except Exception as e:
-        print(f"Error saving profile: {str(e)[:100]}")
+        print(f"Error saving profile: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return False
 
 # Load user profile from MongoDB
@@ -181,12 +228,16 @@ def load_user_profile():
     try:
         collection = get_user_profile_collection()
         if collection is None:
+            print("ERROR: Could not get user profile collection for loading")
             return None
         
         username = st.session_state.get('username', 'default_user')
+        print(f"Loading profile for user: {username}")
+        
         profile = collection.find_one({'username': username})
         
         if profile:
+            print(f"Profile found for {username}")
             # Remove MongoDB _id before returning
             if '_id' in profile:
                 del profile['_id']
@@ -201,10 +252,88 @@ def load_user_profile():
                         profile['photo'] = None
             
             return profile
-        return None
+        else:
+            print(f"No profile found for {username}")
+            return None
     except Exception as e:
-        print(f"Error loading profile: {str(e)[:100]}")
+        print(f"Error loading profile: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return None
+
+# Save user credentials to MongoDB
+def save_user_credentials(username, hashed_password):
+    """Save user login credentials to MongoDB"""
+    try:
+        collection = get_user_profile_collection()
+        if collection is None:
+            print("ERROR: Could not get user profile collection for credentials")
+            return False
+        
+        print(f"Saving credentials for user: {username}")
+        
+        from datetime import datetime
+        
+        # Update or insert credentials
+        result = collection.update_one(
+            {'username': username},
+            {'$set': {
+                'username': username,
+                'password_hash': hashed_password,
+                'last_updated': datetime.now().isoformat()
+            }},
+            upsert=True
+        )
+        
+        print(f"Credentials save result - Matched: {result.matched_count}, Modified: {result.modified_count}, Upserted: {result.upserted_id}")
+        return True
+    except Exception as e:
+        print(f"Error saving credentials: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return False
+
+# Load user credentials from MongoDB
+def load_user_credentials(username):
+    """Load user login credentials from MongoDB"""
+    try:
+        collection = get_user_profile_collection()
+        if collection is None:
+            print("ERROR: Could not get user profile collection for loading credentials")
+            return None
+        
+        print(f"Loading credentials for user: {username}")
+        
+        user = collection.find_one({'username': username})
+        
+        if user and 'password_hash' in user:
+            print(f"Credentials found for {username}")
+            return user['password_hash']
+        else:
+            print(f"No credentials found for {username}")
+            return None
+    except Exception as e:
+        print(f"Error loading credentials: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return None
+
+# Get all usernames from MongoDB
+def get_all_usernames():
+    """Get list of all registered usernames from MongoDB"""
+    try:
+        collection = get_user_profile_collection()
+        if collection is None:
+            print("ERROR: Could not get user profile collection for usernames")
+            return []
+        
+        users = collection.find({}, {'username': 1})
+        usernames = [user['username'] for user in users if 'username' in user]
+        print(f"Found {len(usernames)} users in MongoDB")
+        return usernames
+    except Exception as e:
+        print(f"Error getting usernames: {str(e)}")
+        return []
 
 # Enhanced input prompt
 input_prompt = '''
@@ -242,14 +371,17 @@ def cheque_extractor_app():
         
         for attempt in range(max_retries):
             try:
+                print(f"Attempt {attempt + 1}/{max_retries}: Calling Gemini API...")
                 response = model.generate_content([input_prompt, image[0]])
                 if response and hasattr(response, 'text'):
+                    print(f"✓ Received response from Gemini (length: {len(response.text)} chars)")
                     return response.text
                 else:
-                    st.error("Empty response from Gemini API")
+                    print(f"✗ No text in response: {response}")
                     return None
             except ResourceExhausted as e:
                 error_msg = str(e)
+                print(f"✗ API quota exceeded: {error_msg}")
                 
                 # Extract retry delay if available
                 retry_delay = 60  # Default to 60 seconds
@@ -263,33 +395,30 @@ def cheque_extractor_app():
                         pass
                 
                 if attempt < max_retries - 1:
-                    st.warning(f"⏳ Rate limit reached. Waiting {int(retry_delay)} seconds before retry... (Attempt {attempt + 1}/{max_retries})")
-                    
-                    # Show countdown
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    
-                    for i in range(int(retry_delay)):
-                        remaining = int(retry_delay) - i
-                        progress = (i + 1) / retry_delay
-                        progress_bar.progress(progress)
-                        status_text.text(f"Retrying in {remaining} seconds...")
-                        time.sleep(1)
-                    
-                    progress_bar.empty()
-                    status_text.empty()
-                    st.info("🔄 Retrying now...")
+                    print(f"Retrying in {retry_delay} seconds...")
+                    with st.spinner(f"API quota exceeded. Retrying in {retry_delay} seconds..."):
+                        time.sleep(retry_delay)
                 else:
-                    st.error("❌ Rate limit exceeded. Please try again later.")
-                    st.info("💡 **Tip:** The free tier has a limit of 5 requests per minute. Wait a minute and try again.")
+                    st.error(f"❌ API quota exceeded. Please try again later or check your API limits.")
                     return None
             except Exception as e:
-                st.error(f"❌ Error: {str(e)[:200]}")
+                error_msg = str(e)
+                print(f"✗ Gemini API error (attempt {attempt + 1}): {error_msg}")
+                
+                # Check for specific error types
+                if "API_KEY" in error_msg.upper() or "INVALID" in error_msg.upper():
+                    st.error(f"❌ Invalid API Key: {error_msg}")
+                    return None
+                elif "PERMISSION" in error_msg.upper() or "DENIED" in error_msg.upper():
+                    st.error(f"❌ Permission denied. Please enable Gemini API in Google Cloud Console.")
+                    return None
+                
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
-                    st.info(f"Retrying in {wait_time} seconds...")
+                    print(f"Retrying in {wait_time} seconds...")
                     time.sleep(wait_time)
                 else:
+                    st.error(f"❌ Failed after {max_retries} attempts: {error_msg}")
                     return None
         
         return None
@@ -339,7 +468,6 @@ def cheque_extractor_app():
             ]
             return image_parts, file_hash, False  # Not cached
         except Exception as e:
-            st.error(f"Error reading image file: {str(e)}")
             return None, None, False
 
     # Extract images from PDF
@@ -383,7 +511,6 @@ def cheque_extractor_app():
             clean_data.append(clean_record)
         
         df = pd.DataFrame(clean_data)
-        st.success("✅ Data extracted successfully!")
         st.table(df)
         
         # Save and provide download options
@@ -429,7 +556,6 @@ def cheque_extractor_app():
     
     # Display previously extracted data if exists and no new file is uploaded
     if st.session_state.last_extracted_data is not None and 'uploaded_file' not in locals():
-        st.info(f"📋 Showing previously extracted data from: **{st.session_state.last_uploaded_filename}**")
         display_extracted_results(st.session_state.last_extracted_data, output_folder="extracted_cheques")
         
         # Add option to clear and start fresh
@@ -458,6 +584,8 @@ def cheque_extractor_app():
             image_paths = [image_path]
 
         all_extracted_data = []
+        extraction_errors = []
+        
         for img_path in image_paths:
             with st.spinner(f'🔍 Extracting data from {os.path.basename(img_path)}...'):
                 try:
@@ -467,32 +595,55 @@ def cheque_extractor_app():
                     if is_cached and file_hash in st.session_state.processed_files:
                         parsed_data = st.session_state.processed_files[file_hash]
                         all_extracted_data.append(parsed_data)
+                        st.success(f"✓ Loaded cached data for {os.path.basename(img_path)}")
                         continue
                     
                     if image_data is None:
-                        st.warning(f"Failed to read image: {os.path.basename(img_path)}")
+                        error_msg = f"Failed to process image: {os.path.basename(img_path)}"
+                        extraction_errors.append(error_msg)
+                        st.error(error_msg)
                         continue
                     
+                    st.info(f"Sending image to Gemini AI for analysis...")
                     response_text = get_gemini_response(input_prompt, image_data)
+                    
                     if response_text:
+                        st.success("✓ Received response from Gemini AI")
                         parsed_data = parse_response(response_text)
                         if parsed_data:
                             # Cache the result using json string as key
                             if file_hash:
                                 st.session_state.processed_files[file_hash] = parsed_data.copy()
                             all_extracted_data.append(parsed_data)
+                            st.success(f"✓ Successfully extracted data from {os.path.basename(img_path)}")
                         else:
-                            st.warning(f"⚠️ Failed to parse data from {os.path.basename(img_path)}")
+                            error_msg = f"Failed to parse Gemini response for {os.path.basename(img_path)}"
+                            extraction_errors.append(error_msg)
+                            st.error(error_msg)
+                            st.code(response_text, language="text")
                     else:
-                        st.warning(f"⚠️ No response from API for {os.path.basename(img_path)}")
+                        error_msg = f"No response from Gemini AI for {os.path.basename(img_path)}. Possible reasons:\n- API quota exceeded\n- Invalid API key\n- Network issues\n- Image format not supported"
+                        extraction_errors.append(error_msg)
+                        st.error(error_msg)
+                        
                 except Exception as e:
-                    st.error(f"❌ Error: {str(e)[:150]}")
+                    error_msg = f"Error processing {os.path.basename(img_path)}: {str(e)}"
+                    extraction_errors.append(error_msg)
+                    st.error(error_msg)
                     import traceback
-                    st.code(traceback.format_exc())
+                    st.code(traceback.format_exc(), language="python")
                     continue
 
+        # Show summary of extraction process
+        if extraction_errors:
+            st.warning(f"⚠️ Extraction completed with {len(extraction_errors)} error(s)")
+            with st.expander("View Errors"):
+                for error in extraction_errors:
+                    st.text(error)
+        
         if not all_extracted_data:
-            st.error("❌ No data could be extracted from the uploaded file(s).")
+            st.error("❌ No data could be extracted from the uploaded file(s)")
+            st.info("💡 Tips:\n- Ensure the image is clear and high quality\n- Check if your Google API key is valid\n- Verify you haven't exceeded API quota\n- Try a different cheque image")
             return
         
         # Save to session state for persistence across page navigation
@@ -542,7 +693,6 @@ def cheque_extractor_app():
                 
                 # Insert into user-specific collection
                 result = collection.insert_many(db_data)
-                st.success(f"💾 Saved {len(result.inserted_ids)} cheque(s) to your account!")
                 db_saved = True
                 
                 # Convert ObjectId to string for JSON serialization
@@ -554,14 +704,11 @@ def cheque_extractor_app():
                 save_user_profile(st.session_state.get('profile_data', {}))
                         
             except pymongo.errors.ConnectionFailure as e:
-                st.error(f"❌ Database connection failed. Please check your internet connection.")
-                st.info("💡 Data will still be available for download below.")
+                pass
             except Exception as e:
-                st.error(f"❌ Database save failed: {str(e)[:150]}")
-                st.info("💡 Data will still be available for download below.")
+                pass
         else:
-            st.warning("⚠️ Database connection unavailable. Data not saved to cloud.")
-            st.info("💡 You can still download the data using the buttons below.")
+            pass
         
         # Display the results using the reusable function
         display_extracted_results(all_extracted_data, output_folder)

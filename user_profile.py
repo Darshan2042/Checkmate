@@ -1,6 +1,7 @@
 import streamlit as st
 from PIL import Image
 import io
+import time
 
 def profile_page():
     # Apply premium theme matching dashboard
@@ -192,26 +193,55 @@ def profile_page():
             st.session_state['current_page'] = 'dashboard'
             st.rerun()
 
-    # Initialize session state for profile data
-    if 'profile_data' not in st.session_state:
-        st.session_state.profile_data = {
-            'name': st.session_state.get('username', 'User'),
-            'email': 'user@checkmate.ai',
-            'phone': '+1 (555) 123-4567',
-            'role': 'Premium User',
-            'bio': 'AI-powered cheque processing enthusiast',
-            'photo': None,
-            'joined_date': 'Dec 2024',
-            'total_cheques': 0
-        }
+    # Get current username
+    username = st.session_state.get('username', 'User')
+    
+    # Initialize or load profile data from MongoDB
+    if 'profile_data' not in st.session_state or st.session_state.get('current_profile_user') != username:
+        # Try to load profile from MongoDB
+        from cheque_extractor import load_user_profile
+        loaded_profile = load_user_profile()
+        
+        if loaded_profile:
+            # Load existing profile from database
+            st.session_state.profile_data = loaded_profile
+            # Ensure photo field exists (photo is now stored in DB as base64)
+            if 'photo' not in st.session_state.profile_data:
+                st.session_state.profile_data['photo'] = None
+        else:
+            # Create new profile for this user
+            st.session_state.profile_data = {
+                'name': username.capitalize(),
+                'email': f'{username}@checkmate.ai',
+                'phone': '+1 (555) 000-0000',
+                'role': 'Premium User',
+                'bio': 'AI-powered cheque processing user',
+                'photo': None,
+                'joined_date': 'Dec 2024',
+                'total_cheques': 0
+            }
+        
+        # Mark which user this profile belongs to
+        st.session_state.current_profile_user = username
     
     # Ensure new fields exist in existing profile data
     if 'joined_date' not in st.session_state.profile_data:
         st.session_state.profile_data['joined_date'] = 'Dec 2024'
     
-    # Get real-time cheque count from database
-    from cheque_extractor import get_total_cheque_count
-    st.session_state.profile_data['total_cheques'] = get_total_cheque_count()
+    # Initialize cheque count if not exists
+    if 'total_cheques' not in st.session_state.profile_data:
+        st.session_state.profile_data['total_cheques'] = 0
+    
+    # Update cheque count in background (non-blocking)
+    try:
+        from cheque_extractor import get_total_cheque_count
+        # Only update if not recently fetched
+        if 'last_count_update' not in st.session_state or \
+           (time.time() - st.session_state.get('last_count_update', 0)) > 60:
+            st.session_state.profile_data['total_cheques'] = get_total_cheque_count()
+            st.session_state.last_count_update = time.time()
+    except:
+        pass  # Silently fail, use cached value
     
     # Profile header
     st.markdown("""
@@ -383,8 +413,16 @@ def profile_page():
                 st.session_state.profile_data['phone'] = phone
                 st.session_state.profile_data['role'] = role
                 st.session_state.profile_data['bio'] = bio
+                
+                # Save to MongoDB
+                from cheque_extractor import save_user_profile
+                if save_user_profile(st.session_state.profile_data):
+                    st.success("✅ Profile updated and saved to database!")
+                else:
+                    st.success("✅ Profile updated locally!")
+                    st.info("💡 Profile will be saved to database when you extract a cheque.")
+                
                 st.session_state.edit_mode = False
-                st.success("✅ Profile updated successfully!")
                 st.balloons()
                 st.rerun()
     

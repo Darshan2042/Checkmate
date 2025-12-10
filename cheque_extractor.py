@@ -58,43 +58,153 @@ def initialize_gemini():
     st.stop()
 
 # MongoDB setup (optional - only used if saving to database)
-def get_mongodb_collection():
-    """Get MongoDB collection with proper SSL configuration"""
+@st.cache_resource(ttl=300)  # Cache for 5 minutes
+def get_mongodb_client():
+    """Get MongoDB client with proper SSL configuration"""
     try:
         load_dotenv(override=True)
         MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://pawardarshan1204_db_user:e8YWNKRO8G7W7Nf3@cluster0.zr2canz.mongodb.net/")
         
-        # Configure MongoDB client with proper SSL/TLS settings
-        client = pymongo.MongoClient(
-            MONGO_URI,
-            tlsCAFile=certifi.where(),  # Use certifi for SSL certificates
-            serverSelectionTimeoutMS=10000,
-            connectTimeoutMS=10000,
-            socketTimeoutMS=10000,
-            retryWrites=True,
-            w='majority'
-        )
+        # Try different SSL configurations for Windows compatibility
+        try:
+            # First attempt: Use system SSL with shorter timeout
+            import ssl
+            client = pymongo.MongoClient(
+                MONGO_URI,
+                tls=True,
+                tlsAllowInvalidCertificates=False,
+                serverSelectionTimeoutMS=3000,  # Reduced to 3 seconds
+                connectTimeoutMS=3000
+            )
+            client.admin.command('ping')
+        except:
+            # Fallback: Allow invalid certificates for Windows SSL issues
+            client = pymongo.MongoClient(
+                MONGO_URI,
+                tls=True,
+                tlsAllowInvalidCertificates=True,
+                serverSelectionTimeoutMS=3000,  # Reduced to 3 seconds
+                connectTimeoutMS=3000
+            )
+            client.admin.command('ping')
         
-        # Test connection
-        client.admin.command('ping')
-        db = client['infosys']
-        return db['cheque_data']
+        return client
     except Exception as e:
-        print(f"MongoDB connection error: {str(e)}")
+        print(f"MongoDB connection error: {str(e)[:200]}")
         return None
 
-# Get total cheque count from database
-def get_total_cheque_count():
-    """Get the total number of cheques processed from the database"""
+def get_mongodb_collection():
+    """Get user-specific MongoDB collection for cheque data"""
     try:
+        client = get_mongodb_client()
+        if client is None:
+            return None
+        
+        # Get current username from session
+        username = st.session_state.get('username', 'default_user')
+        
+        db = client['checkmate_db']
+        # Each user gets their own collection
+        collection_name = f'cheques_{username}'
+        return db[collection_name]
+    except Exception as e:
+        print(f"Error getting collection: {str(e)[:200]}")
+        return None
+
+def get_user_profile_collection():
+    """Get MongoDB collection for user profiles"""
+    try:
+        client = get_mongodb_client()
+        if client is None:
+            return None
+        
+        db = client['checkmate_db']
+        return db['user_profiles']
+    except Exception as e:
+        print(f"Error getting profile collection: {str(e)[:200]}")
+        return None
+
+# Get total cheque count from database with caching
+@st.cache_data(ttl=60)  # Cache for 1 minute
+def get_total_cheque_count(username=None):
+    """Get the total number of cheques processed by the user"""
+    try:
+        if username is None:
+            username = st.session_state.get('username', 'default_user')
+        
         collection = get_mongodb_collection()
         if collection is not None:
             count = collection.count_documents({})
             return count
         return 0
     except Exception as e:
-        print(f"Error getting cheque count: {str(e)}")
+        print(f"Error getting cheque count: {str(e)[:100]}")
         return 0
+
+# Save user profile to MongoDB
+def save_user_profile(profile_data):
+    """Save user profile data to MongoDB"""
+    try:
+        collection = get_user_profile_collection()
+        if collection is None:
+            return False
+        
+        username = st.session_state.get('username', 'default_user')
+        
+        # Prepare profile data
+        profile_to_save = profile_data.copy()
+        
+        # Convert photo to base64 for MongoDB storage
+        if 'photo' in profile_to_save and profile_to_save['photo']:
+            import base64
+            if isinstance(profile_to_save['photo'], bytes):
+                profile_to_save['photo'] = base64.b64encode(profile_to_save['photo']).decode('utf-8')
+        
+        profile_to_save['username'] = username
+        from datetime import datetime
+        profile_to_save['last_updated'] = datetime.now().isoformat()
+        
+        # Update or insert profile
+        collection.update_one(
+            {'username': username},
+            {'$set': profile_to_save},
+            upsert=True
+        )
+        return True
+    except Exception as e:
+        print(f"Error saving profile: {str(e)[:100]}")
+        return False
+
+# Load user profile from MongoDB
+def load_user_profile():
+    """Load user profile data from MongoDB"""
+    try:
+        collection = get_user_profile_collection()
+        if collection is None:
+            return None
+        
+        username = st.session_state.get('username', 'default_user')
+        profile = collection.find_one({'username': username})
+        
+        if profile:
+            # Remove MongoDB _id before returning
+            if '_id' in profile:
+                del profile['_id']
+            
+            # Convert base64 photo back to bytes
+            if 'photo' in profile and profile['photo']:
+                import base64
+                if isinstance(profile['photo'], str):
+                    try:
+                        profile['photo'] = base64.b64decode(profile['photo'])
+                    except:
+                        profile['photo'] = None
+            
+            return profile
+        return None
+    except Exception as e:
+        print(f"Error loading profile: {str(e)[:100]}")
+        return None
 
 # Enhanced input prompt
 input_prompt = '''
@@ -261,33 +371,37 @@ def cheque_extractor_app():
     # Function to display extracted results
     def display_extracted_results(all_extracted_data, output_folder):
         """Display the extracted data with download options"""
-        df = pd.DataFrame(all_extracted_data)
-        st.success("✅ Data extracted successfully!")
-        st.table(df)
-        
-        # Clean data for JSON export (remove any MongoDB ObjectIds)
-        json_data = []
+        # Clean data for display and export (remove/convert ObjectIds)
+        clean_data = []
         for record in all_extracted_data:
             clean_record = {}
             for key, value in record.items():
-                if key == '_id':
-                    if isinstance(value, ObjectId):
-                        clean_record[key] = str(value)
-                    else:
-                        clean_record[key] = value
+                if isinstance(value, ObjectId):
+                    clean_record[key] = str(value)
                 else:
                     clean_record[key] = value
-            json_data.append(clean_record)
+            clean_data.append(clean_record)
+        
+        df = pd.DataFrame(clean_data)
+        st.success("✅ Data extracted successfully!")
+        st.table(df)
         
         # Save and provide download options
         csv_buffer = io.StringIO()
         json_buffer = io.StringIO()
-        csv_writer = csv.DictWriter(csv_buffer, fieldnames=all_extracted_data[0].keys())
-        csv_writer.writeheader()
-        csv_writer.writerows(all_extracted_data)
-        json.dump(json_data, json_buffer, indent=4)
+        
+        # Use clean_data (without ObjectIds) for CSV
+        if clean_data:
+            csv_writer = csv.DictWriter(csv_buffer, fieldnames=clean_data[0].keys())
+            csv_writer.writeheader()
+            csv_writer.writerows(clean_data)
+        
+        # JSON export
+        json.dump(clean_data, json_buffer, indent=4)
+        
+        # PDF export
         pdf_filename = os.path.join(output_folder, "cheque_data.pdf")
-        save_as_pdf(all_extracted_data[0], pdf_filename)
+        save_as_pdf(clean_data[0] if clean_data else {}, pdf_filename)
 
         st.subheader("📥 Download Options")
         col1, col2, col3 = st.columns(3)
@@ -392,16 +506,32 @@ def cheque_extractor_app():
             try:
                 from datetime import datetime
                 
-                # Get user profile data
-                user_name = st.session_state.get('profile_data', {}).get('name', 'Unknown User')
-                user_email = st.session_state.get('profile_data', {}).get('email', 'no-email@example.com')
+                # Get current user info
+                username = st.session_state.get('username', 'default_user')
+                
+                # Ensure profile_data exists - load from MongoDB if not in session
+                if 'profile_data' not in st.session_state:
+                    loaded_profile = load_user_profile()
+                    if loaded_profile:
+                        st.session_state.profile_data = loaded_profile
+                    else:
+                        # Create default profile if none exists
+                        st.session_state.profile_data = {
+                            'name': username.capitalize(),
+                            'email': f'{username}@checkmate.ai',
+                            'phone': '+1 (555) 000-0000'
+                        }
+                
+                user_name = st.session_state.get('profile_data', {}).get('name', username)
+                user_email = st.session_state.get('profile_data', {}).get('email', f'{username}@checkmate.ai')
                 user_phone = st.session_state.get('profile_data', {}).get('phone', 'N/A')
                 
                 db_data = []
                 for data in all_extracted_data:
                     db_record = data.copy()
                     
-                    # Add metadata
+                    # Add metadata - IMPORTANT: This links cheque to user
+                    db_record['username'] = username  # User identifier
                     db_record['extraction_date'] = datetime.now().isoformat()
                     db_record['extracted_by'] = user_name
                     db_record['user_email'] = user_email
@@ -410,15 +540,18 @@ def cheque_extractor_app():
                     
                     db_data.append(db_record)
                 
-                # Insert into MongoDB
+                # Insert into user-specific collection
                 result = collection.insert_many(db_data)
-                st.success(f"💾 Successfully saved {len(result.inserted_ids)} record(s) to database!")
+                st.success(f"💾 Saved {len(result.inserted_ids)} cheque(s) to your account!")
                 db_saved = True
                 
                 # Convert ObjectId to string for JSON serialization
                 for i, record in enumerate(db_data):
                     if '_id' in record:
                         all_extracted_data[i]['_id'] = str(record['_id'])
+                
+                # Also save/update user profile
+                save_user_profile(st.session_state.get('profile_data', {}))
                         
             except pymongo.errors.ConnectionFailure as e:
                 st.error(f"❌ Database connection failed. Please check your internet connection.")

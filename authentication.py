@@ -2,6 +2,55 @@ import streamlit as st
 import bcrypt
 import streamlit.components.v1 as components
 
+# Function to initialize user profile data from MongoDB
+def initialize_user_profile(username):
+    """Load user profile from MongoDB or create new one"""
+    try:
+        from cheque_extractor import load_user_profile
+        
+        # Try to load existing profile
+        loaded_profile = load_user_profile()
+        
+        if loaded_profile:
+            # Load existing profile from database
+            st.session_state.profile_data = loaded_profile
+            # Ensure photo field exists (photo is now stored in DB as base64)
+            if 'photo' not in st.session_state.profile_data:
+                st.session_state.profile_data['photo'] = None
+        else:
+            # Create new profile for this user
+            st.session_state.profile_data = {
+                'name': username.capitalize(),
+                'email': f'{username}@checkmate.ai',
+                'phone': '+1 (555) 000-0000',
+                'role': 'Premium User',
+                'bio': 'AI-powered cheque processing user',
+                'photo': None,
+                'joined_date': 'Dec 2024',
+                'total_cheques': 0
+            }
+            
+            # Save the new profile to MongoDB
+            from cheque_extractor import save_user_profile
+            save_user_profile(st.session_state.profile_data)
+        
+        # Mark which user this profile belongs to
+        st.session_state.current_profile_user = username
+        
+    except Exception as e:
+        # Fallback to basic profile if MongoDB fails
+        st.session_state.profile_data = {
+            'name': username.capitalize(),
+            'email': f'{username}@checkmate.ai',
+            'phone': '+1 (555) 000-0000',
+            'role': 'Premium User',
+            'bio': 'AI-powered cheque processing user',
+            'photo': None,
+            'joined_date': 'Dec 2024',
+            'total_cheques': 0
+        }
+        st.session_state.current_profile_user = username
+
 # Initialize session-based user storage (no database required)
 def init_users_db():
     if 'users_db' not in st.session_state:
@@ -28,6 +77,10 @@ def register_user(username, password):
     # Set session state to mark the user as authenticated
     st.session_state["authenticated"] = True
     st.session_state["username"] = username
+    
+    # Load or initialize user profile from MongoDB
+    initialize_user_profile(username)
+    
     st.rerun()
     return True
 
@@ -229,6 +282,10 @@ def login_signup():
                         if authenticate_user(username, password):
                             st.session_state["authenticated"] = True
                             st.session_state["username"] = username
+                            
+                            # Load user profile from MongoDB
+                            initialize_user_profile(username)
+                            
                             st.success(f"✅ Login successful. Welcome back, {username}!")
                             st.rerun()
                         else:

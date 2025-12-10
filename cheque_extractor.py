@@ -18,13 +18,16 @@ import certifi
 # Initialize Gemini model (cached to avoid re-initialization)
 @st.cache_resource
 def initialize_gemini():
-    # Load environment variables fresh
-    load_dotenv(override=True)
-    key = os.getenv("GOOGLE_API_KEY")
+    # Try Streamlit secrets first (for cloud), then fall back to .env (for local)
+    try:
+        key = st.secrets["GOOGLE_API_KEY"]
+    except:
+        load_dotenv(override=True)
+        key = os.getenv("GOOGLE_API_KEY")
     
     if not key or key.strip() == "":
         st.error("❌ Google API Key not found!")
-        st.info("Please add your GOOGLE_API_KEY to the .env file")
+        st.info("Please add your GOOGLE_API_KEY to Streamlit secrets or .env file")
         st.stop()
     
     try:
@@ -72,11 +75,17 @@ def initialize_gemini():
 def get_mongodb_client():
     """Get MongoDB client with proper SSL configuration"""
     try:
-        load_dotenv(override=True)
-        MONGO_URI = os.getenv("MONGO_URI")
+        # Try Streamlit secrets first (for cloud), then fall back to .env (for local)
+        try:
+            MONGO_URI = st.secrets["MONGO_URI"]
+            print("Using MONGO_URI from Streamlit secrets")
+        except:
+            load_dotenv(override=True)
+            MONGO_URI = os.getenv("MONGO_URI")
+            print("Using MONGO_URI from .env file")
         
         if not MONGO_URI:
-            print("ERROR: MONGO_URI not found in .env file")
+            print("ERROR: MONGO_URI not found in secrets or .env file")
             return None
         
         # Remove quotes and whitespace if present
